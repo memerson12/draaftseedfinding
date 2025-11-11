@@ -1,9 +1,11 @@
 package com.mvc;
 
+import com.mvc.filters.biome.OverworldBiomeFilter;
 import com.mvc.filters.structure.EndStructureFilter;
 import com.mvc.filters.structure.NetherStructureFilter;
 import com.mvc.filters.structure.OverworldStructureFilter;
 import com.seedfinding.mccore.rand.ChunkRand;
+import com.seedfinding.mccore.state.Dimension;
 
 import java.io.FileWriter;
 import java.io.IOException;
@@ -63,8 +65,20 @@ public class Main {
         Long matchedStructureSeed = filterStructureSeed(seed) ? seed : null;
 
         if (matchedStructureSeed != null) {
-            output.write(matchedStructureSeed + "\n");
-            seedMatches++;
+            if (Config.DIMENSION.equals(Dimension.OVERWORLD)) {
+                for (long biomeSeed = 0; biomeSeed < 1L << 16; biomeSeed++) {
+                    long worldSeed = biomeSeed << 48 | matchedStructureSeed;
+                    Long matchedWorldSeed = filterWorldSeed(worldSeed, matchedStructureSeed) ? worldSeed : null;
+
+                    if (matchedWorldSeed != null) {
+                        output.write(matchedWorldSeed + "\n");
+                        seedMatches++;
+                    }
+                }
+            } else {
+                output.write(matchedStructureSeed + "\n");
+                seedMatches++;
+            }
         }
         seedsChecked++;
         currentTime = System.currentTimeMillis();
@@ -77,11 +91,29 @@ public class Main {
 
     private static boolean filterStructureSeed(long structureSeed) {
         ChunkRand chunkRand = new ChunkRand(structureSeed);
-        OverworldStructureFilter overworldStructureFilter = new OverworldStructureFilter(structureSeed, chunkRand);
-        NetherStructureFilter netherStructureFilter = new NetherStructureFilter(structureSeed, chunkRand);
-        EndStructureFilter endStructureFilter = new EndStructureFilter(structureSeed, chunkRand);
 
-        return netherStructureFilter.filterStructures() && endStructureFilter.filterStructures() && overworldStructureFilter.filterStructures();
+        if (Config.DIMENSION.equals(Dimension.OVERWORLD)) {
+            OverworldStructureFilter overworldStructureFilter = new OverworldStructureFilter(structureSeed, chunkRand);
+            return overworldStructureFilter.filterStructures();
+        } else if (Config.DIMENSION.equals(Dimension.NETHER)) {
+            NetherStructureFilter netherStructureFilter = new NetherStructureFilter(structureSeed, chunkRand);
+            return netherStructureFilter.filterStructures();
+        } else if (Config.DIMENSION.equals(Dimension.END)) {
+            EndStructureFilter endStructureFilter = new EndStructureFilter(structureSeed, chunkRand);
+            return endStructureFilter.filterStructures();
+        } else {
+            OverworldStructureFilter overworldStructureFilter = new OverworldStructureFilter(structureSeed, chunkRand);
+            NetherStructureFilter netherStructureFilter = new NetherStructureFilter(structureSeed, chunkRand);
+            EndStructureFilter endStructureFilter = new EndStructureFilter(structureSeed, chunkRand);
+            return netherStructureFilter.filterStructures() && endStructureFilter.filterStructures() && overworldStructureFilter.filterStructures();
+        }
+    }
+
+    private static boolean filterWorldSeed(long worldSeed, long structureSeed) {
+        ChunkRand chunkRand = new ChunkRand(structureSeed);
+        OverworldBiomeFilter overworldBiomeFilter = new OverworldBiomeFilter(worldSeed, structureSeed, chunkRand);
+
+        return overworldBiomeFilter.filterBiomes();
     }
 
     private static void initialize() throws IOException {

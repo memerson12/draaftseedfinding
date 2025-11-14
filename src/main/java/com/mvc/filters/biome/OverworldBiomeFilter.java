@@ -312,9 +312,9 @@ public class OverworldBiomeFilter {
                 for (int z = 0; z < 4; z++) {
                     int x_256 = pos.getX() * 4 + x;
                     int z_256 = pos.getZ() * 4 + z;
-                    if (biomeLayer26.sample(x_256, 0, z_256) == 38) {
+                    if (biomeLayer19.sample(x_256, 0, z_256) == 38) {
                         woodedBadlandsPlateau = true;
-                    } else if (biomeLayer26.sample(x_256, 0, z_256) == 39) {
+                    } else if (biomeLayer19.sample(x_256, 0, z_256) == 39) {
                         badlandsPlateau = true;
                     }
                 }

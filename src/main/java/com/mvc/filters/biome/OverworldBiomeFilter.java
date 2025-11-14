@@ -6,6 +6,8 @@ import com.seedfinding.mcbiome.layer.BiomeLayer;
 import com.seedfinding.mcbiome.layer.IntBiomeLayer;
 import com.seedfinding.mcbiome.source.OverworldBiomeSource;
 import com.seedfinding.mccore.rand.ChunkRand;
+import com.seedfinding.mccore.util.data.Pair;
+import com.seedfinding.mccore.util.pos.BPos;
 import com.seedfinding.mccore.util.pos.CPos;
 import com.seedfinding.mcfeature.structure.DesertPyramid;
 import com.seedfinding.mcfeature.structure.Monument;
@@ -48,16 +50,51 @@ public class OverworldBiomeFilter {
         this.snowyPositions = new ArrayList<>();
     }
 
-    public boolean filterOverworld() {
-        return hasMidgame() && filterBiomes();
+    public Pair<Boolean, ArrayList<BPos>> filterOverworld() {
+        if (!hasMidgame()) {
+            return new Pair<>(false, null);
+        }
+        Pair<Boolean, ArrayList<BPos>> biomes = filterBiomes();
+        return new Pair<>(biomes.getFirst(), biomes.getSecond());
     }
 
     private boolean hasMidgame() {
-        return hasVillage() && hasTemple() && hasMonument() && hasOutpost() && hasMidgameTemples(5);
+        return hasTemple() && hasVillage() && hasMonument() && hasOutpost() && hasMidgameTemples(5);
     }
 
-    private boolean filterBiomes() {
-        return hasBiomeTiles() && hasMushroomBiomes() && hasJungleBiomes() && hasMegaTaigaBiomes() && hasSnowyBiomes() && hasBadlandsBiomes();
+    private Pair<Boolean, ArrayList<BPos>> filterBiomes() {
+        if (!hasBiomeTiles()) {
+            return new Pair<>(false, null);
+        }
+        Pair<Boolean, BPos> mushroomBiomes = hasMushroomBiomes();
+        if (!mushroomBiomes.getFirst()) {
+            return new Pair<>(false, null);
+        }
+        Pair<Boolean, BPos> jungleBiomes = hasJungleBiomes();
+        if (!jungleBiomes.getFirst()) {
+            return new Pair<>(false, null);
+        }
+        Pair<Boolean, BPos> megaTaigaBiomes = hasMegaTaigaBiomes();
+        if (!megaTaigaBiomes.getFirst()) {
+            return new Pair<>(false, null);
+        }
+        Pair<Boolean, BPos> snowyBiomes = hasSnowyBiomes();
+        if (!snowyBiomes.getFirst()) {
+            return new Pair<>(false, null);
+        }
+        Pair<Boolean, BPos> badlandsBiomes = hasBadlandsBiomes();
+        if (!badlandsBiomes.getFirst()) {
+            return new Pair<>(false, null);
+        }
+
+        ArrayList<BPos> coordinates = new ArrayList<>();
+        coordinates.add(mushroomBiomes.getSecond());
+        coordinates.add(jungleBiomes.getSecond());
+        coordinates.add(megaTaigaBiomes.getSecond());
+        coordinates.add(snowyBiomes.getSecond());
+        coordinates.add(badlandsBiomes.getSecond());
+
+        return new Pair<>(true, coordinates);
     }
 
     private boolean hasVillage() {
@@ -210,7 +247,7 @@ public class OverworldBiomeFilter {
         return freezing;
     }
 
-    private boolean hasMushroomBiomes() {
+    private Pair<Boolean, BPos> hasMushroomBiomes() {
         /*
         id 14 is mushroom_fields
         checking at 256:1
@@ -225,16 +262,16 @@ public class OverworldBiomeFilter {
                         int x_16 = pos.getX() * 16 + x;
                         int z_16 = pos.getZ() * 16 + z;
                         if (biomeLayer31.sample(x_16, 0, z_16) == 15) {
-                            return true;
+                            return new Pair<>(true, new BPos(x_16 * 16, 0, z_16 * 16));
                         }
                     }
                 }
             }
         }
-        return false;
+        return new Pair<>(false, null);
     }
 
-    private boolean hasJungleBiomes() {
+    private Pair<Boolean, BPos> hasJungleBiomes() {
         /*
         id 168 is bamboo_jungle
         checking at 256:1
@@ -253,7 +290,7 @@ public class OverworldBiomeFilter {
                                 int x_64 = x_256 * 4 + i;
                                 int z_64 = z_256 * 4 + j;
                                 if (biomeLayer26.sample(x_64, 0, z_64) == 169) {
-                                    return true;
+                                    return new Pair<>(true, new BPos(x_64 * 64, 0, z_64 * 64));
                                 }
                             }
                         }
@@ -261,10 +298,10 @@ public class OverworldBiomeFilter {
                 }
             }
         }
-        return false;
+        return new Pair<>(false, null);
     }
 
-    private boolean hasMegaTaigaBiomes() {
+    private Pair<Boolean, BPos> hasMegaTaigaBiomes() {
         /*
         id 32 is giant_tree_taiga
         checking at 256:1
@@ -283,7 +320,7 @@ public class OverworldBiomeFilter {
                                 int x_64 = x_256 * 4 + i;
                                 int z_64 = z_256 * 4 + j;
                                 if (biomeLayer26.sample(x_64, 0, z_64) == 33) {
-                                    return true;
+                                    return new Pair<>(true, new BPos(x_64 * 64, 0, z_64 * 64));
                                 }
                             }
                         }
@@ -291,10 +328,10 @@ public class OverworldBiomeFilter {
                 }
             }
         }
-        return false;
+        return new Pair<>(false, null);
     }
 
-    private boolean hasBadlandsBiomes() {
+    private Pair<Boolean, BPos> hasBadlandsBiomes() {
         /*
         id 38 is wooded_badlands_plateau
         checking at 256:1
@@ -302,25 +339,33 @@ public class OverworldBiomeFilter {
         id 39 is badlands_plateau
         checking at 256:1
         */
-        boolean woodedBadlandsPlateau = false;
-        boolean badlandsPlateau = false;
+        boolean woodedBadlandsPlateau;
+        boolean badlandsPlateau;
         for (CPos pos: badlandsPositions) {
+            woodedBadlandsPlateau = false;
+            badlandsPlateau = false;
             for (int x = 0; x < 4; x++) {
                 for (int z = 0; z < 4; z++) {
                     int x_256 = pos.getX() * 4 + x;
                     int z_256 = pos.getZ() * 4 + z;
                     if (biomeLayer19.sample(x_256, 0, z_256) == 38) {
                         woodedBadlandsPlateau = true;
+                        if (badlandsPlateau) {
+                            return new Pair<>(true, new BPos(x_256 * 256, 0, z_256 * 256));
+                        }
                     } else if (biomeLayer19.sample(x_256, 0, z_256) == 39) {
                         badlandsPlateau = true;
+                        if (woodedBadlandsPlateau) {
+                            return new Pair<>(true, new BPos(x_256 * 256, 0, z_256 * 256));
+                        }
                     }
                 }
             }
         }
-        return badlandsPlateau && woodedBadlandsPlateau;
+        return new Pair<>(false, null);
     }
 
-    private boolean hasSnowyBiomes() {
+    private Pair<Boolean, BPos> hasSnowyBiomes() {
         /*
         id 30 is snowy_taiga
         checking at 256:1
@@ -339,7 +384,7 @@ public class OverworldBiomeFilter {
                                 int x_64 = x_256 * 4 + i;
                                 int z_64 = z_256 * 4 + j;
                                 if (biomeLayer26.sample(x_64, 0, z_64) == 31) {
-                                    return true;
+                                    return new Pair<>(true, new BPos(x_64 * 64, 0, z_64 * 64));
                                 }
                             }
                         }
@@ -347,6 +392,6 @@ public class OverworldBiomeFilter {
                 }
             }
         }
-        return false;
+        return new Pair<>(false, null);
     }
 }

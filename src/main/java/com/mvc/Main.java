@@ -6,9 +6,12 @@ import com.mvc.filters.structure.NetherStructureFilter;
 import com.mvc.filters.structure.OverworldStructureFilter;
 import com.seedfinding.mccore.rand.ChunkRand;
 import com.seedfinding.mccore.state.Dimension;
+import com.seedfinding.mccore.util.data.Pair;
+import com.seedfinding.mccore.util.pos.BPos;
 
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Random;
 import java.util.Scanner;
 
@@ -24,7 +27,7 @@ public class Main {
         if (Config.FILTER.equals(Config.FILTER_TYPE.FILE)) {
             filterFile();
         } else if (Config.FILTER.equals(Config.FILTER_TYPE.INCREMENTAL)) {
-            filterIncremental(100476778);
+            filterIncremental(100000000);
         } else if (Config.FILTER.equals(Config.FILTER_TYPE.RANDOM)) {
             filterRandom();
         } else {
@@ -44,7 +47,7 @@ public class Main {
 
     private static void filterIncremental(long start) throws IOException {
         while (seedMatches < Config.SEED_MATCHES) {
-            checkSeed(start);
+            checkSeed(start & ((1L << 48) - 1));
             start++;
         }
     }
@@ -68,10 +71,11 @@ public class Main {
             if (Config.DIMENSION.equals(Dimension.OVERWORLD)) {
                 for (long biomeSeed = 0; biomeSeed < (1L << 16); biomeSeed++) {
                     long worldSeed = (biomeSeed << 48) | matchedStructureSeed;
-                    Long matchedWorldSeed = filterWorldSeed(worldSeed, matchedStructureSeed) ? worldSeed : null;
+                    Pair<Boolean, ArrayList<BPos>> filteredWorldSeed = filterWorldSeed(worldSeed, matchedStructureSeed);
+                    Long matchedWorldSeed = filteredWorldSeed.getFirst() ? worldSeed : null;
 
                     if (matchedWorldSeed != null) {
-                        output.write(matchedWorldSeed + "\n");
+                        output.write(matchedWorldSeed + " " + filteredWorldSeed.getSecond() + "\n");
                         seedMatches++;
                     }
                 }
@@ -109,7 +113,7 @@ public class Main {
         }
     }
 
-    private static boolean filterWorldSeed(long worldSeed, long structureSeed) {
+    private static Pair<Boolean, ArrayList<BPos>> filterWorldSeed(long worldSeed, long structureSeed) {
         ChunkRand chunkRand = new ChunkRand(structureSeed);
         OverworldBiomeFilter overworldBiomeFilter = new OverworldBiomeFilter(worldSeed, structureSeed, chunkRand);
 

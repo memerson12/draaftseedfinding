@@ -57,7 +57,7 @@ public class Main {
         Random random = new Random();
 
         while (seedMatches < Config.SEED_MATCHES) {
-            checkSeed(random.nextLong() % (1L << 48));
+            checkSeed(random.nextLong() & ((1L << 48) - 1));
         }
     }
 

@@ -3,7 +3,6 @@ package com.mvc.filters.structure;
 import com.mvc.Config;
 import com.seedfinding.mcbiome.biome.Biome;
 import com.seedfinding.mcbiome.biome.Biomes;
-import com.seedfinding.mcbiome.source.BiomeSource;
 import com.seedfinding.mcbiome.source.NetherBiomeSource;
 import com.seedfinding.mccore.block.Block;
 import com.seedfinding.mccore.block.Blocks;
@@ -12,7 +11,6 @@ import com.seedfinding.mccore.util.pos.BPos;
 import com.seedfinding.mccore.util.pos.CPos;
 import com.seedfinding.mcfeature.structure.BastionRemnant;
 import com.seedfinding.mcfeature.structure.Fortress;
-import com.seedfinding.mcnoise.noise.NoiseSampler;
 import com.seedfinding.mcterrain.terrain.NetherTerrainGenerator;
 
 import java.util.*;
@@ -25,7 +23,7 @@ public class NetherStructureFilter {
     private CPos fortressPos;
     private final NetherBiomeSource netherBiomeSource;
 
-    private static final int MAX_SEARCH_DEPTH = 500; // Stop after checking 500 chunks
+    private static final int MAX_SEARCH_DEPTH = 250; // Stop after checking 500 chunks
     private static final int HEURISTIC_WEIGHT = 2; // Multiplier to make it greedy-ish (faster, less perfect)
 
     public NetherStructureFilter(long structureSeed, ChunkRand chunkRand) {
@@ -36,7 +34,7 @@ public class NetherStructureFilter {
     }
 
     public boolean filterStructures() {
-        return hasBastion() && hasFortress() && isSSV() && canPathToBastion(new CPos(0,0), bastionPos); //&& hasBastionTerrainAirSampling();
+        return hasBastion() && hasFortress() && isSSV() && isSpaceForPortal() && canPathToBastion(new CPos(0, 0), bastionPos);
     }
 
     private boolean hasBastion() {
@@ -70,7 +68,7 @@ public class NetherStructureFilter {
         return false;
     }
 
-    public boolean canPathToBastion(CPos start, CPos target) {
+    private boolean canPathToBastion(CPos start, CPos target) {
         PriorityQueue<Node> openSet = new PriorityQueue<>();
         Set<CPos> closedSet = new HashSet<>();
 
@@ -109,6 +107,39 @@ public class NetherStructureFilter {
             }
         }
         return false; // No path found
+    }
+
+    private boolean isSpaceForPortal() {
+        int x = 0;
+        int z = 0;
+
+        // Iterate from just above the lava ocean (32) to the ceiling (approx 120)
+        // We look for a solid block that has air immediately above it.
+        for (int y = 32; y < 120; y++) {
+
+            Optional<Block> floor = netherTerrainGenerator.getBlockAt(x, y, z);
+
+            // 1. Check if we have a solid floor
+            if (floor.isPresent() && !floor.get().equals(Blocks.AIR) && !floor.get().equals(Blocks.LAVA)) {
+
+                // 2. Check for clearance (space for the portal frame)
+                // We need roughly 3-4 blocks of air above the floor.
+                boolean hasClearance = true;
+                for (int offset = 1; offset <= 4; offset++) {
+                    Optional<Block> airSpace = netherTerrainGenerator.getBlockAt(x, y + offset, z);
+                    if (airSpace.isPresent() && !airSpace.get().equals(Blocks.AIR)) {
+                        hasClearance = false;
+                        break;
+                    }
+                }
+
+                if (hasClearance) {
+                    return true; // Found valid terrain
+                }
+            }
+        }
+
+        return false; // No valid spot found in the column
     }
 
     private boolean hasBastionTerrainAirSampling() {

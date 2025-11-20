@@ -8,13 +8,15 @@ import com.seedfinding.mccore.block.Block;
 import com.seedfinding.mccore.block.Blocks;
 import com.seedfinding.mccore.rand.ChunkRand;
 import com.seedfinding.mccore.util.math.DistanceMetric;
-import com.seedfinding.mccore.util.pos.BPos;
 import com.seedfinding.mccore.util.pos.CPos;
 import com.seedfinding.mcfeature.structure.BastionRemnant;
 import com.seedfinding.mcfeature.structure.Fortress;
 import com.seedfinding.mcterrain.terrain.NetherTerrainGenerator;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.PriorityQueue;
 
 public class NetherStructureFilter {
     private final long structureSeed;
@@ -24,8 +26,9 @@ public class NetherStructureFilter {
     private NetherBiomeSource netherBiomeSource;
     private NetherTerrainGenerator netherTerrainGenerator;
 
-    private static final int MAX_SEARCH_DEPTH = 250; // Stop after checking 500 chunks
-    private static final int HEURISTIC_WEIGHT = 2; // Multiplier to make it greedy-ish (faster, less perfect)
+    private static final int MAX_SEARCH_DEPTH = 100; // Stop after checking 100 chunks
+    private static final double HEURISTIC_MULTIPLIER = 1.5; // Bias factor (1.0 is neutral, 2.0 is very greedy)
+    private static final int MAX_PATH_LENGTH = 14;   // Max chunks to travel
 
     public NetherStructureFilter(long structureSeed, ChunkRand chunkRand) {
         this.structureSeed = structureSeed;
@@ -68,81 +71,71 @@ public class NetherStructureFilter {
     }
 
     private boolean canPathToBastion(CPos start, CPos target) {
-        PriorityQueue<Node> openSet = new PriorityQueue<>();
-        Set<CPos> closedSet = new HashSet<>();
+        // Pre-check: If Manhattan distance is > 10, it's mathematically impossible to reach in 10 steps.
+        if (Math.abs(start.getX() - target.getX()) + Math.abs(start.getZ() - target.getZ()) > MAX_PATH_LENGTH) {
+            return false;
+        }
 
-        openSet.add(new Node(start, 0, getHeuristic(start, target)));
+        PriorityQueue<Node> openSet = new PriorityQueue<>();
+        // Map tracks the fewest steps taken to reach a chunk.
+        // If we reach a chunk in 5 steps, we reject future paths that reach it in 6 steps.
+        Map<CPos, Integer> visitedSteps = new HashMap<>();
+
+        openSet.add(new Node(start, 0, getHeuristic(start, target), 0, null));
+        visitedSteps.put(start, 0);
 
         int checks = 0;
 
         while (!openSet.isEmpty()) {
             Node current = openSet.poll();
 
-            if (checks++ > MAX_SEARCH_DEPTH) return false; // Took too long
-            if (current.pos.equals(target)) return true; // Reached destination
-            if (closedSet.contains(current.pos)) continue; // Already been here
+            if (checks++ > MAX_SEARCH_DEPTH) return false; // Computation limit
+            if (current.pos.equals(target)) {
+                Node temp = current;
+                while (temp != null) {
+                    temp = temp.parent;
+                }
+                return true;   // Success
+            }
+
             if (current.pos.distanceTo(target, DistanceMetric.EUCLIDEAN) > Config.BASTION_DISTANCE) { // Went too far from the target
-                closedSet.add(current.pos);
+                visitedSteps.put(current.pos, current.steps);
                 continue;
             }
 
-            closedSet.add(current.pos);
+            // Optimization: If we found a path to this node previously that was shorter/equal steps, skip.
+            if (visitedSteps.containsKey(current.pos) && visitedSteps.get(current.pos) < current.steps) {
+                continue;
+            }
 
-//            // Check neighbors (North, South, East, West)
-//            int[][] directions = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
-            int[][] directions = getDirections(target);
+            // Standard Neighbors
+            int[][] directions = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
 
             for (int[] dir : directions) {
                 CPos neighborPos = new CPos(current.pos.getX() + dir[0], current.pos.getZ() + dir[1]);
+                int newSteps = current.steps + 1;
 
-                if (closedSet.contains(neighborPos)) continue;
+                // 1. HARD LIMIT: Max 10 Chunks
+                if (newSteps > MAX_PATH_LENGTH) continue;
 
-                // 1. Check Physical Terrain (Walls/Lava)
-                if (!isChunkWalkable(neighborPos)) {
-                    continue; // Wall or Lava detected
+                // 2. Loop/Redundancy Check
+                if (visitedSteps.containsKey(neighborPos) && visitedSteps.get(neighborPos) <= newSteps) {
+                    continue;
                 }
 
-                // 2. Calculate Movement Cost (incorporating Biomes)
+                // 3. Terrain Validation (Walls/Lava)
+                if (!isChunkWalkable(neighborPos)) continue;
+
+                // 4. Cost Calculation
                 double traversalCost = getBiomeCost(neighborPos);
                 double newGCost = current.gCost + traversalCost;
                 double newHCost = getHeuristic(neighborPos, target);
 
-                openSet.add(new Node(neighborPos, newGCost, newHCost));
+                visitedSteps.put(neighborPos, newSteps);
+                openSet.add(new Node(neighborPos, newGCost, newHCost, newSteps, current));
             }
         }
-        return false; // No path found
-    }
-
-    private static int[][] getDirections(CPos target) {
-        if (Math.abs(target.getX()) < Math.abs(target.getZ())) { // Z is major axis
-            if (target.getZ() < 0) {
-                if (target.getX() < 0) {
-                    return new int[][]{{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
-                } else {
-                    return new int[][]{{0, -1}, {1, 0}, {-1, 0}, {0, 1}};
-                }
-            } else {
-                if (target.getX() < 0) {
-                    return new int[][]{{0, 1}, {-1, 0}, {1, 0}, {0, -1}};
-                } else {
-                    return new int[][]{{0, 1}, {1, 0}, {-1, 0}, {0, -1}};
-                }
-            }
-        } else { // X is major axis
-            if (target.getX() < 0) {
-                if (target.getZ() < 0) {
-                    return new int[][]{{-1, 0}, {0, -1}, {0, 1}, {1, 0}};
-                } else {
-                    return new int[][]{{-1, 0}, {0, 1}, {0, -1}, {1, 0}};
-                }
-            } else {
-                if (target.getZ() < 0) {
-                    return new int[][]{{1, 0}, {0, -1}, {0, 1}, {-1, 0}};
-                } else {
-                    return new int[][]{{1, 0}, {0, 1}, {0, -1}, {-1, 0}};
-                }
-            }
-        }
+        return false;
     }
 
     private boolean isSpaceForPortal() {
@@ -179,68 +172,6 @@ public class NetherStructureFilter {
         return false; // No valid spot found in the column
     }
 
-    private boolean hasBastionTerrainAirSampling() {
-        Random random = new Random();
-        int air = 0;
-        CPos spawn = new CPos(0, 0);
-
-        while (spawn.getX() != bastionPos.getX() || spawn.getZ() != bastionPos.getZ()) {
-            // move toward bastion along axis we are furthest from
-            if (Math.abs(bastionPos.getX() - spawn.getX()) < Math.abs(bastionPos.getZ() - spawn.getZ())) {
-                spawn = spawn.add(0, bastionPos.getZ() > 0 ? 1 : -1);
-            } else {
-                spawn = spawn.add(bastionPos.getX() > 0 ? 1 : -1, 0);
-            }
-
-            // sample chunk and see if it meets air threshold
-            for (int s = 0; s < 25; s++) {
-                int x = random.nextInt(16);
-                int y = random.nextInt(16);
-                int z = random.nextInt(16);
-
-                Optional<Block> block = netherTerrainGenerator.getBlockAt(spawn.toBlockPos().getX() + x, 57 + y, spawn.toBlockPos().getZ() + z);
-                if (block.isPresent() && block.get().equals(Blocks.AIR)) {
-                    air++;
-                }
-            }
-
-            if (air < 1) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean hasBastionTerrainHeightCheck() {
-        NetherTerrainGenerator netherTerrainGenerator = new NetherTerrainGenerator(netherBiomeSource);
-        BPos approxBastion = new BPos(bastionPos.toBlockPos(64));
-
-        for (int i = 1; i <= 10; i++) {
-            double t = (double) i / 10;
-            int x = (int) (approxBastion.getX() * t);
-            int z = (int) (approxBastion.getZ() * t);
-            Block[] column = netherTerrainGenerator.getColumnAt(x, z);
-            int air = 0;
-            boolean lastBlockAir = false;
-
-            for (int b = 40; b < 100; b++) {
-                if (!lastBlockAir && column[b].equals(Blocks.AIR)) {
-                    lastBlockAir = true;
-                    continue;
-                }
-                if (lastBlockAir && column[b].equals(Blocks.AIR)) {
-                    if (++air > 5) {
-                        return true;
-                    }
-                }
-                if (!column[b].equals(Blocks.AIR)) {
-                    lastBlockAir = false;
-                    air = 0;
-                }
-            }
-        }
-        return false;
-    }
 
     private boolean isSSV() {
         netherBiomeSource = new NetherBiomeSource(Config.VERSION, structureSeed);
@@ -254,26 +185,43 @@ public class NetherStructureFilter {
 
     private static class Node implements Comparable<Node> {
         CPos pos;
-        double gCost; // Cost from start
-        double hCost; // Heuristic (estimated dist to end)
-        double fCost; // Total cost (g + h)
+        double gCost;
+        double hCost;
+        double fCost;
+        int steps;
+        Node parent;
 
-        public Node(CPos pos, double gCost, double hCost) {
+        public Node(CPos pos, double gCost, double hCost, int steps, Node parent) {
             this.pos = pos;
             this.gCost = gCost;
             this.hCost = hCost;
             this.fCost = gCost + hCost;
+            this.steps = steps;
+            this.parent = parent;
         }
 
         @Override
         public int compareTo(Node other) {
-            return Double.compare(this.fCost, other.fCost);
+            // 1. Compare Total Cost (Standard A*)
+            int compare = Double.compare(this.fCost, other.fCost);
+
+            // 2. NEW: Tie-Breaker
+            // If total costs are equal, prefer the node with lower hCost (closer to target)
+            if (compare == 0) {
+                return Double.compare(this.hCost, other.hCost);
+            }
+
+            return compare;
         }
     }
 
     // Manhattan distance is faster than Euclidean and fits grid movement
     private double getHeuristic(CPos a, CPos b) {
-        return (Math.abs(a.getX() - b.getX()) + Math.abs(a.getZ() - b.getZ())) * HEURISTIC_WEIGHT;
+        // Manhattan distance
+        double distance = Math.abs(a.getX() - b.getX()) + Math.abs(a.getZ() - b.getZ());
+
+        // Multiply by 1.5 (or higher) to make the algorithm favor direction over terrain cost.
+        return distance * HEURISTIC_MULTIPLIER;
     }
 
     private double getBiomeCost(CPos pos) {
@@ -281,8 +229,7 @@ public class NetherStructureFilter {
         // High penalty for Basalt Deltas (obstacles), moderate for Soul Sand (slow)
         if (biome.getCategory() == Biome.Category.NETHER) {
             // Note: You'll need to map your specific Biome objects here
-            if (biome.getId() == Biomes.BASALT_DELTAS.getId()) return 8.0;
-            if (biome.getId() == Biomes.SOUL_SAND_VALLEY.getId()) return 2.0;
+            if (biome.getId() == Biomes.BASALT_DELTAS.getId()) return 4.0;
         }
         return 1.0;
     }
@@ -302,7 +249,7 @@ public class NetherStructureFilter {
                     if (hasFloor) return true; // Valid space found
                 } else if (!block.get().equals(Blocks.LAVA)) {
                     hasFloor = true; // Solid ground
-                } else {
+                } else if (block.get().equals(Blocks.LAVA)) {
                     hasFloor = false; // Reset on lava
                 }
             }
